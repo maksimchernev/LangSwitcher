@@ -315,7 +315,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         description.isEnabled = false
         menu.addItem(.separator())
         if !trusted || monitorError {
-            addItem("Разрешить работу…", action: #selector(openPermissions), to: menu)
+            addItem("Разрешить работу…", action: #selector(requestPermissions), to: menu)
+            addItem("Открыть настройки доступа…", action: #selector(openPermissions), to: menu)
             menu.addItem(.separator())
         }
         layouts.refresh()
@@ -364,6 +365,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         tap.cancel()
         reset()
         updateMenu()
+    }
+
+    @objc private func requestPermissions() {
+        if !AXIsProcessTrusted() {
+            let promptKey = kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String
+            let options = [promptKey: true] as CFDictionary
+            _ = AXIsProcessTrustedWithOptions(options)
+        } else if monitorError, CGRequestListenEventAccess() {
+            startIfPermitted()
+        }
     }
 
     @objc private func openPermissions() {
