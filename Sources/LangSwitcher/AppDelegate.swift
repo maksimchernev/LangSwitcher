@@ -45,8 +45,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var eventSource: CFRunLoopSource?
     private var timer: Timer?
     private var status: NSStatusItem!
-    private let menuBarIcon = MenuBarIcon.make()
-    private let permissionIcon = MenuBarIcon.make(needsPermission: true)
     private var revision = 0
     private var pendingEdit: PasteEdit?
     private var waitingToQuit = false
@@ -67,6 +65,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         status = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         status.button?.imagePosition = .imageOnly
         status.button?.imageScaling = .scaleNone
+        status.button?.image = MenuBarIcon.make()
         let menu = NSMenu()
         menu.delegate = self
         status.menu = menu
@@ -379,7 +378,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(.separator())
         addItem("О LangSwitcher", action: #selector(about), to: menu)
         addItem("Выйти", action: #selector(quit), to: menu)
-        status.button?.image = canPost && !monitorError ? menuBarIcon : permissionIcon
         status.button?.toolTip = "LangSwitcher — \(label)"
         status.button?.setAccessibilityLabel("LangSwitcher. \(label)")
     }

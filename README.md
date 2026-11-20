@@ -21,7 +21,7 @@ bash scripts/build.sh
 3. If the menu says it still needs keyboard access, choose **Request Access** again and enable LangSwitcher under **Privacy & Security → Input Monitoring**, then quit and reopen it.
 4. Make sure at least two keyboard layouts are enabled under **System Settings → Keyboard → Text Input → Edit**. The **Системные раскладки** (System Layouts) submenu lists the layouts LangSwitcher can use.
 
-The app is signed locally during the build. After replacing an older build, quit it and open the new copy. If macOS still reports missing access, remove the old LangSwitcher entry from Accessibility and add the new app. Menu labels are currently in Russian. Look for the **A** and **Я** keys in the menu bar. An exclamation mark indicates a missing permission.
+The app is signed locally during the build. After replacing an older build, quit it and open the new copy. If macOS still reports missing access, remove the old LangSwitcher entry from Accessibility and add the new app. Menu labels are currently in Russian. Look for the **A** and **Я** keys in the menu bar. The menu shows the current permission status.
 
 ## Use it
 

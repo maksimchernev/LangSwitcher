@@ -1,14 +1,11 @@
 import AppKit
 
 enum MenuBarIcon {
-    static func make(needsPermission: Bool = false) -> NSImage {
-        let size = NSSize(width: needsPermission ? 34 : 28, height: 16)
+    static func make() -> NSImage {
+        let size = NSSize(width: 28, height: 16)
         let image = NSImage(size: size, flipped: false) { _ in
             drawKey("A", at: 1)
             drawKey("Я", at: 15)
-            if needsPermission {
-                drawGlyph("!", centeredIn: NSRect(x: 28, y: 2, width: 6, height: 12), size: 10)
-            }
             return true
         }
         image.isTemplate = true
@@ -21,15 +18,11 @@ enum MenuBarIcon {
         outline.lineWidth = 1
         NSColor.black.setStroke()
         outline.stroke()
-        drawGlyph(label, centeredIn: key, size: 8)
-    }
-
-    private static func drawGlyph(_ text: String, centeredIn rect: NSRect, size: CGFloat) {
-        let font = NSFont.systemFont(ofSize: size, weight: .semibold)
-        let glyph = NSAttributedString(string: text, attributes: [.font: font, .foregroundColor: NSColor.black])
+        let font = NSFont.systemFont(ofSize: 8, weight: .semibold)
+        let glyph = NSAttributedString(string: label, attributes: [.font: font, .foregroundColor: NSColor.black])
         glyph.draw(at: NSPoint(
-            x: rect.midX - glyph.size().width / 2,
-            y: rect.midY - font.capHeight / 2 + font.descender
+            x: key.midX - glyph.size().width / 2,
+            y: key.midY - font.capHeight / 2 + font.descender
         ))
     }
 }
