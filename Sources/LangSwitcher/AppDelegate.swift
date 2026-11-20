@@ -45,6 +45,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var eventSource: CFRunLoopSource?
     private var timer: Timer?
     private var status: NSStatusItem!
+    private let menuBarIcon = MenuBarIcon.make()
+    private let permissionIcon = MenuBarIcon.make(needsPermission: true)
     private var revision = 0
     private var pendingEdit: PasteEdit?
     private var waitingToQuit = false
@@ -63,8 +65,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             return
         }
         status = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        status.button?.title = "⌥↔"
-        status.button?.toolTip = "LangSwitcher — исправить раскладку текста"
+        status.button?.imagePosition = .imageOnly
+        status.button?.imageScaling = .scaleNone
         let menu = NSMenu()
         menu.delegate = self
         status.menu = menu
@@ -342,8 +344,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         else if !canPost { label = "Нужно разрешить вставку текста" }
         else { label = "Работает · \(shortcut.title)" }
         menu.addItem(withTitle: label, action: nil, keyEquivalent: "")
-        let description = menu.addItem(withTitle: "Выделение или последнее слово → другая раскладка", action: nil, keyEquivalent: "")
-        description.isEnabled = false
         menu.addItem(.separator())
         if !canPost || monitorError {
             addItem("Разрешить работу…", action: #selector(requestPermissions), to: menu)
@@ -379,7 +379,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(.separator())
         addItem("О LangSwitcher", action: #selector(about), to: menu)
         addItem("Выйти", action: #selector(quit), to: menu)
-        status.button?.title = canPost && !monitorError ? "⌥↔" : "⌥!"
+        status.button?.image = canPost && !monitorError ? menuBarIcon : permissionIcon
+        status.button?.toolTip = "LangSwitcher — \(label)"
+        status.button?.setAccessibilityLabel("LangSwitcher. \(label)")
     }
 
     @discardableResult private func addItem(_ title: String, action: Selector, to menu: NSMenu) -> NSMenuItem {
