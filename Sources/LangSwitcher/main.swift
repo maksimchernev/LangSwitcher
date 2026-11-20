@@ -6,6 +6,7 @@ if CommandLine.arguments.contains("--diagnose") {
     let layouts = KeyboardLayouts()
     print("LangSwitcher \(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "dev")")
     print("Accessibility: \(AXIsProcessTrusted() ? "granted" : "not granted")")
+    print("Posting input events: \(CGPreflightPostEventAccess() ? "granted" : "not granted")")
     print("Current input source: \(layouts.currentID ?? "unavailable")")
     for layout in layouts.enabled { print("Layout: \(layout.name) [\(layout.id)]") }
     if let result = layouts.conversion("ghbdtn", sourceID: "com.apple.keylayout.ABC") {

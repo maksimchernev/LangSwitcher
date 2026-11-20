@@ -116,9 +116,4 @@ public final class KeyboardLayouts {
     @discardableResult public func select(_ layout: KeyboardLayout) -> Bool {
         TISSelectInputSource(layout.source) == noErr
     }
-
-    @discardableResult public func select(id: String) -> Bool {
-        guard let layout = enabled.first(where: { $0.id == id }) else { return false }
-        return select(layout)
-    }
 }

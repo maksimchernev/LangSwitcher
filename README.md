@@ -8,7 +8,7 @@ LangSwitcher lives in the menu bar and runs on demand. It uses the keyboard layo
 
 ## Build and install
 
-You need an **Apple silicon Mac** running **macOS 13 or later** and Xcode or Xcode Command Line Tools with **Swift 6**.
+The app runs on **Apple silicon** with **macOS 13 or later**. Building requires **Swift 6** and the **macOS 15.4 SDK or later**, available with Xcode or Xcode Command Line Tools.
 
 ```sh
 git clone https://github.com/maksimchernev/LangSwitcher.git
@@ -35,9 +35,9 @@ With more than two layouts, repeated taps cycle through the layouts that change 
 
 ## Compatibility and privacy
 
-LangSwitcher edits fields that let macOS Accessibility read and replace text. Some editors and browser fields may not support replacement, and formatting behavior varies by app. Password fields, secure input, and composition-based input methods are skipped.
+LangSwitcher uses macOS Accessibility to verify the focused field and selection, then replaces the range with the editor's normal paste command. If the field or range cannot be verified, the shortcut skips the edit. Formatting follows the editor's plain-text paste behavior. Password fields, secure input, and composition-based input methods are skipped.
 
-Text is processed on your Mac. Recent input is held in memory while the field is focused. LangSwitcher does not write typed text to disk or change the clipboard.
+Text is processed on your Mac. Recent input is held in memory while the field is focused. LangSwitcher temporarily puts the replacement on the clipboard, then restores your previous contents on this Mac or clears the clipboard if it was empty. It checks for newer clipboard contents before writing or restoring. If macOS asks for paste access, it is needed to save and restore the clipboard. The edit is skipped if the original contents cannot be saved.
 
 ## Checks
 
@@ -46,4 +46,4 @@ bash scripts/check.sh
 dist/LangSwitcher.app/Contents/MacOS/LangSwitcher --diagnose
 ```
 
-The checks cover word boundaries, shortcut handling, and layout conversion. The diagnostic command prints the active layout, available layouts, and Accessibility status. If a particular app has trouble, include its name, your macOS version, and a sample you can share when [opening an issue](https://github.com/maksimchernev/LangSwitcher/issues/new).
+The checks cover word boundaries, shortcut handling, layout conversion, and restoration of isolated test clipboards. The diagnostic command prints the available layouts and whether macOS lets the process use Accessibility and post input events. If a particular app has trouble, include its name, your macOS version, and a sample you can share when [opening an issue](https://github.com/maksimchernev/LangSwitcher/issues/new).

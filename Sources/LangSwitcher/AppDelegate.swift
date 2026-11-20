@@ -46,7 +46,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var timer: Timer?
     private var status: NSStatusItem!
     private var revision = 0
-    private var isReplacing = false
+    private var pendingEdit: PasteEdit?
+    private var waitingToQuit = false
     private var history: (cycle: ConversionCycle, range: NSRange)?
     private var gestureField: TextField?
     private var focusObserver: AXObserver?
@@ -82,10 +83,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        cancelPendingEdit()
         timer?.invalidate()
         if let eventTap { CFMachPortInvalidate(eventTap) }
         if let eventSource { CFRunLoopRemoveSource(CFRunLoopGetMain(), eventSource, .commonModes) }
         if let focusObserver { CFRunLoopRemoveSource(CFRunLoopGetMain(), AXObserverGetRunLoopSource(focusObserver), .commonModes) }
+    }
+
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        guard let pendingEdit, pendingEdit.waitingForPaste else { return .terminateNow }
+        waitingToQuit = true
+        pendingEdit.cancel()
+        return .terminateLater
     }
 
     private func startIfPermitted() {
@@ -116,7 +125,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             if let eventTap { CGEvent.tapEnable(tap: eventTap, enable: true) }
             return false
         }
-        guard !isReplacing else { return false }
+        if event.getIntegerValueField(.eventSourceUserData) == PasteEdit.eventMarker { return false }
         let code = event.getIntegerValueField(.keyboardEventKeycode)
         let flags = event.flags.intersection([.maskCommand, .maskControl, .maskAlternate, .maskShift, .maskSecondaryFn])
         if type == .leftMouseDown || type == .rightMouseDown || type == .otherMouseDown || type == .scrollWheel {
@@ -157,6 +166,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             suppressedFunctionKey = true
             return true
         }
+        pendingEdit?.beforeUserKey()
         revision += 1
         history = nil
         checkFocus()
@@ -181,18 +191,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private func checkFocus() {
         let current = TextAccess.focusedField()
-        let same = field.flatMap { old in current.map { old.same(as: $0) } } ?? false
+        let same = field.flatMap { old in current.map { old.same(as: $0) } } ?? (field == nil && current == nil)
         if !same { reset() }
         field = current
         if let current, observedPID != current.pid { observeFocus(in: current.pid) }
     }
 
     private func reset() {
+        cancelPendingEdit()
         word.reset()
         history = nil
         tap.cancel()
         gestureField = nil
         revision += 1
+    }
+
+    private func cancelPendingEdit() {
+        pendingEdit?.cancel()
     }
 
     private func otherKeysDown(excluding code: Int64) -> Bool {
@@ -210,11 +225,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         focusObserver = nil
         observedPID = pid
         var observer: AXObserver?
-        guard AXObserverCreate(pid, { _, _, _, pointer in
+        guard AXObserverCreate(pid, { _, _, name, pointer in
             guard let pointer else { return }
             let owner = Unmanaged<AppDelegate>.fromOpaque(pointer).takeUnretainedValue()
-            owner.reset()
-            owner.field = nil
+            if name as String == kAXFocusedWindowChangedNotification {
+                owner.applicationChanged()
+            } else {
+                // A delayed notification for the same field should not discard newly typed keys.
+                owner.checkFocus()
+            }
         }, &observer) == .success, let observer else { return }
         let app = AXUIElementCreateApplication(pid)
         let pointer = Unmanaged.passUnretained(self).toOpaque()
@@ -225,15 +244,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private func scheduleConversion(for expectedField: TextField) {
-        guard stillFocused(expectedField), let text = expectedField.text,
-              let selection = expectedField.selection else { return }
-        let snapshot = EditSnapshot(revision: revision, text: text, selection: selection)
+        guard pendingEdit == nil else { return }
+        let triggeredAt = revision
         DispatchQueue.main.async { [weak self] in
-            guard let self, self.revision == snapshot.revision else { return }
-            self.checkFocus()
-            guard self.revision == snapshot.revision, self.stillFocused(expectedField),
-                  let value = expectedField.text, let range = expectedField.selection,
-                  snapshot.matches(EditSnapshot(revision: self.revision, text: value, selection: range)) else { return }
+            guard let self, self.pendingEdit == nil, self.revision == triggeredAt,
+                  self.stillFocused(expectedField),
+                  let snapshot = expectedField.snapshot(revision: triggeredAt) else { return }
             self.convert(field: expectedField, snapshot: snapshot)
         }
     }
@@ -261,34 +277,44 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         } else {
             guard selection.length == 0, word.expectedCaret == selection.location,
                   let sourceID = word.sourceID,
-                  let wordRange = replacementRange(in: snapshot.text, caret: selection.location, expected: word.text) else { reset(); return }
+                  let wordRange = lastWordRange(in: snapshot.text, caret: selection.location, matchingRecent: word.text),
+                  let stringRange = Range(wordRange, in: snapshot.text) else { reset(); return }
             range = wordRange
-            cycle = ConversionCycle(text: word.text, sourceID: sourceID, strokes: word.strokes)
+            let fullWord = String(snapshot.text[stringRange])
+            let missingStrokes = max(0, fullWord.count - word.strokes.count)
+            let strokes = Array<KeyboardStroke?>(repeating: nil, count: missingStrokes) + word.strokes
+            cycle = ConversionCycle(text: fullWord, sourceID: sourceID, strokes: strokes)
             isWord = true
         }
-        let original = cycle.text
         guard let target = cycle.advance(in: layouts.enabled) else { return }
-        let oldSource = layouts.currentID
-        guard revision == snapshot.revision, field.text == snapshot.text, field.selection == selection,
-              stillFocused(field), layouts.select(target), stillFocused(field) else {
-            if let oldSource { layouts.select(id: oldSource) }
-            return
-        }
-        isReplacing = true
-        let changed = field.replace(range, expected: original, with: cycle.text, in: snapshot.text) {
-            self.revision == snapshot.revision && self.stillFocused(field)
-        }
-        isReplacing = false
-        guard changed else {
-            if let oldSource { layouts.select(id: oldSource) }
-            reset()
-            NSSound.beep()
-            return
-        }
-        let newRange = NSRange(location: range.location, length: cycle.text.utf16.count)
-        if isWord { word.replace(with: cycle.text, sourceID: target.id, caret: NSMaxRange(newRange), strokes: cycle.strokes) }
-        else { word.reset() }
-        history = (cycle, newRange)
+        guard let edit = PasteEdit(field: field, snapshot: snapshot, range: range, replacement: cycle.text,
+                                   stillFocused: { [weak self] in
+            guard let self else { return false }
+            return self.revision == snapshot.revision && self.stillFocused(field)
+        }, completion: { [weak self] result in
+            guard let self else { return }
+            self.pendingEdit = nil
+            if self.waitingToQuit {
+                NSApp.reply(toApplicationShouldTerminate: true)
+                return
+            }
+            if result == .cancelled { return }
+            guard result == .pasted, self.layouts.select(target) else {
+                self.reset()
+                NSSound.beep()
+                return
+            }
+            let newRange = NSRange(location: range.location, length: cycle.text.utf16.count)
+            if isWord {
+                self.word.replace(with: cycle.text, sourceID: target.id,
+                                  caret: NSMaxRange(newRange), strokes: cycle.strokes)
+            } else {
+                self.word.reset()
+            }
+            self.history = (cycle, newRange)
+        }) else { return }
+        pendingEdit = edit
+        edit.start()
     }
 
     private func stillFocused(_ expected: TextField) -> Bool {
@@ -309,12 +335,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         guard let menu = status?.menu else { return }
         menu.removeAllItems()
         let trusted = AXIsProcessTrusted()
-        let label = !trusted ? "Нужен Универсальный доступ" : monitorError ? "Нужен доступ к клавиатуре" : "Работает · \(shortcut.title)"
+        let canPost = trusted && CGPreflightPostEventAccess()
+        let label: String
+        if !trusted { label = "Нужен Универсальный доступ" }
+        else if monitorError { label = "Нужен доступ к клавиатуре" }
+        else if !canPost { label = "Нужно разрешить вставку текста" }
+        else { label = "Работает · \(shortcut.title)" }
         menu.addItem(withTitle: label, action: nil, keyEquivalent: "")
         let description = menu.addItem(withTitle: "Выделение или последнее слово → другая раскладка", action: nil, keyEquivalent: "")
         description.isEnabled = false
         menu.addItem(.separator())
-        if !trusted || monitorError {
+        if !canPost || monitorError {
             addItem("Разрешить работу…", action: #selector(requestPermissions), to: menu)
             addItem("Открыть настройки доступа…", action: #selector(openPermissions), to: menu)
             menu.addItem(.separator())
@@ -348,7 +379,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(.separator())
         addItem("О LangSwitcher", action: #selector(about), to: menu)
         addItem("Выйти", action: #selector(quit), to: menu)
-        status.button?.title = trusted && !monitorError ? "⌥↔" : "⌥!"
+        status.button?.title = canPost && !monitorError ? "⌥↔" : "⌥!"
     }
 
     @discardableResult private func addItem(_ title: String, action: Selector, to menu: NSMenu) -> NSMenuItem {
@@ -372,13 +403,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             let promptKey = kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String
             let options = [promptKey: true] as CFDictionary
             _ = AXIsProcessTrustedWithOptions(options)
-        } else if monitorError, CGRequestListenEventAccess() {
-            startIfPermitted()
+        } else if monitorError {
+            if CGRequestListenEventAccess() { startIfPermitted() }
+        } else if !CGPreflightPostEventAccess() {
+            _ = CGRequestPostEventAccess()
         }
     }
 
     @objc private func openPermissions() {
-        let anchor = AXIsProcessTrusted() ? "Privacy_ListenEvent" : "Privacy_Accessibility"
+        let anchor = AXIsProcessTrusted() && monitorError ? "Privacy_ListenEvent" : "Privacy_Accessibility"
         if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?\(anchor)") {
             NSWorkspace.shared.open(url)
         }
@@ -400,7 +433,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @objc private func about() {
         let alert = NSAlert()
         alert.messageText = "LangSwitcher"
-        alert.informativeText = "Нажмите и отпустите \(shortcut.title), чтобы исправить выделение или последнее набранное слово.\n\nПовторное нажатие переключает обратно. После выхода из поля история стирается.\n\nИспользуются системные раскладки macOS. Буфер обмена не меняется."
+        alert.informativeText = "Нажмите и отпустите \(shortcut.title), чтобы исправить выделение или последнее набранное слово.\n\nПовторное нажатие переключает обратно. После выхода из поля история стирается.\n\nИспользуются системные раскладки macOS. После вставки содержимое буфера обмена восстанавливается."
         alert.runModal()
     }
 

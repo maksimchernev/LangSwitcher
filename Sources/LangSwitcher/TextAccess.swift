@@ -1,6 +1,7 @@
 import AppKit
 import ApplicationServices
 import Carbon
+import SwitcherCore
 
 struct TextField {
     let element: AXUIElement
@@ -18,10 +19,31 @@ struct TextField {
     }
 
     var selectedText: String? { attribute(kAXSelectedTextAttribute) as? String }
-    var text: String? { attribute(kAXValueAttribute) as? String }
+    var hasMultipleSelections: Bool {
+        ((attribute(kAXSelectedTextRangesAttribute) as? [Any])?.count ?? 0) > 1
+    }
+
+    var text: String? {
+        if let value = attribute(kAXValueAttribute) as? String { return value }
+        // Some rich text controls expose their text through a parameterized range.
+        guard let length = attribute(kAXNumberOfCharactersAttribute) as? Int,
+              (0...1_000_000).contains(length) else { return nil }
+        var range = CFRange(location: 0, length: length)
+        guard let parameter = AXValueCreate(.cfRange, &range) else { return nil }
+        var value: CFTypeRef?
+        let status = AXUIElementCopyParameterizedAttributeValue(
+            element, kAXStringForRangeParameterizedAttribute as CFString, parameter, &value
+        )
+        return status == .success ? value as? String : nil
+    }
 
     var isSecure: Bool {
         (attribute(kAXSubroleAttribute) as? String) == kAXSecureTextFieldSubrole || IsSecureEventInputEnabled()
+    }
+
+    func snapshot(revision: Int) -> EditSnapshot? {
+        guard let text, let selection else { return nil }
+        return EditSnapshot(revision: revision, text: text, selection: selection)
     }
 
     func attribute(_ name: String) -> CFTypeRef? {
@@ -35,30 +57,25 @@ struct TextField {
         return AXUIElementSetAttributeValue(element, kAXSelectedTextRangeAttribute as CFString, value) == .success
     }
 
-    func setSelectedText(_ text: String) -> Bool {
-        AXUIElementSetAttributeValue(element, kAXSelectedTextAttribute as CFString, text as CFString) == .success
+    var isEditableText: Bool {
+        guard !isSecure, (attribute(kAXEnabledAttribute) as? Bool) != false else { return false }
+        if let editability { return editability }
+        let role = attribute(kAXRoleAttribute) as? String
+        return [kAXTextFieldRole, kAXTextAreaRole, kAXComboBoxRole].contains(role)
     }
 
-    func replace(_ range: NSRange, expected: String, with replacement: String, in snapshot: String,
-                 stillValid: () -> Bool) -> Bool {
-        guard stillValid(), text == snapshot, !isSecure,
-              let stringRange = Range(range, in: snapshot), String(snapshot[stringRange]) == expected,
-              let oldSelection = selection else { return false }
-        var writable = DarwinBoolean(false)
-        guard AXUIElementIsAttributeSettable(element, kAXSelectedTextAttribute as CFString, &writable) == .success,
-              writable.boolValue, select(range) else { return false }
-        guard stillValid(), text == snapshot, selectedText == expected else {
-            if stillValid() { _ = select(oldSelection) }
-            return false
+    var canEdit: Bool {
+        guard !isSecure, (attribute(kAXEnabledAttribute) as? Bool) != false else { return false }
+        if let editability { return editability }
+        return [kAXSelectedTextAttribute, kAXValueAttribute].contains { name in
+            var writable = DarwinBoolean(false)
+            let status = AXUIElementIsAttributeSettable(element, name as CFString, &writable)
+            return status == .success && writable.boolValue
         }
-        guard setSelectedText(replacement) else {
-            if stillValid() { _ = select(oldSelection) }
-            return false
-        }
-        let expectedValue = snapshot.replacingCharacters(in: stringRange, with: replacement)
-        guard text == expectedValue else { return false }
-        _ = select(NSRange(location: range.location + replacement.utf16.count, length: 0))
-        return true
+    }
+
+    private var editability: Bool? {
+        (attribute("AXEditable") as? Bool) ?? (attribute("AXIsEditable") as? Bool)
     }
 }
 
@@ -74,13 +91,18 @@ enum TextAccess {
               let value, CFGetTypeID(value) == AXUIElementGetTypeID() else { return nil }
         let element = value as! AXUIElement
         AXUIElementSetMessagingTimeout(element, 0.12)
-        let field = TextField(element: element, pid: front.processIdentifier)
-        guard !field.isSecure else { return nil }
-        let role = field.attribute(kAXRoleAttribute) as? String
-        guard [kAXTextFieldRole, kAXTextAreaRole, kAXComboBoxRole].contains(role) else { return nil }
-        if let enabled = field.attribute(kAXEnabledAttribute) as? Bool, !enabled { return nil }
-        if let editable = field.attribute("AXEditable") as? Bool, !editable { return nil }
-        return field
-    }
+        let focused = TextField(element: element, pid: front.processIdentifier)
+        guard !focused.isSecure else { return nil }
+        if focused.isEditableText { return focused }
 
+        // Web editors can expose a focused child rather than the editable container.
+        guard let parent = focused.attribute("AXEditableAncestor"),
+              CFGetTypeID(parent) == AXUIElementGetTypeID() else { return nil }
+        let container = parent as! AXUIElement
+        var pid: pid_t = 0
+        guard AXUIElementGetPid(container, &pid) == .success, pid == front.processIdentifier else { return nil }
+        AXUIElementSetMessagingTimeout(container, 0.12)
+        let field = TextField(element: container, pid: pid)
+        return field.isEditableText ? field : nil
+    }
 }

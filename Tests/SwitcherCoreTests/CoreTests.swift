@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import SwitcherCore
 
@@ -40,7 +41,16 @@ func check(_ condition: Bool, _ message: String, file: StaticString, line: UInt)
         tests.testAlreadyHeldKeyOrMousePreventsModifierTap()
         tests.testMixedSelectionRoundTripIsExactAndEquivalentLayoutsAreSkipped()
         tests.testCapsLockPunctuationRetainsPhysicalStroke()
-        print("16 scenarios; \(failures) failed assertions")
+        tests.testFindsWholeWordWhenBrowserOnlyTrackedItsSuffix()
+        tests.testWordRangeRejectsMiddleOfWordAndUnrelatedText()
+        tests.testTypingHistoryToleratesOneEventOfCaretLag()
+        tests.testPasteboardRestoresTextAndOtherRepresentations()
+        tests.testPasteboardRestoresAnEmptyBoard()
+        tests.testPasteboardKeepsContentsCopiedDuringTheEdit()
+        tests.testPasteboardDoesNotStageOverNewerContents()
+        tests.testPasteboardDeclinesFilePromises()
+        tests.testNativeTextPasteReplacesWholeWordAndRestoresClipboard()
+        print("25 scenarios; \(failures) failed assertions")
         if failures > 0 { exit(1) }
     }
     func testTracksOnlyWordAfterLastSpace() {
@@ -194,5 +204,130 @@ func check(_ condition: Bool, _ message: String, file: StaticString, line: UInt)
         var word = TypedWord()
         word.append("[", sourceID: en.id, at: 0, stroke: KeyboardStroke(key: 33, capsLock: true))
         XCTAssertEqual(en.convert(word.text, to: ru, physicalStrokes: word.strokes), "Х")
+    }
+
+    func testFindsWholeWordWhenBrowserOnlyTrackedItsSuffix() {
+        let text = "тест привет "
+        let range = lastWordRange(in: text, caret: 12, matchingRecent: "ривет ")
+        XCTAssertEqual(range, NSRange(location: 5, length: 7))
+        if let range, let swiftRange = Range(range, in: text) {
+            XCTAssertEqual(text.replacingCharacters(in: swiftRange, with: "ghbdtn "), "тест ghbdtn ")
+        }
+        XCTAssertEqual(lastWordRange(in: "👋 [kt,  more", caret: 9, matchingRecent: "kt,  "),
+                       NSRange(location: 3, length: 6))
+    }
+
+    func testWordRangeRejectsMiddleOfWordAndUnrelatedText() {
+        XCTAssertNil(lastWordRange(in: "приветствие", caret: 6, matchingRecent: "ривет"))
+        XCTAssertNil(lastWordRange(in: "тест привет ", caret: 12, matchingRecent: "руддщ "))
+        XCTAssertNil(lastWordRange(in: "привет\n ", caret: 8, matchingRecent: " "))
+        XCTAssertNil(lastWordRange(in: "привет ", caret: 7, matchingRecent: ""))
+    }
+
+    func testTypingHistoryToleratesOneEventOfCaretLag() {
+        var word = TypedWord()
+        word.append("п", sourceID: "ru", at: 0)
+        for (caret, character) in "ривет ".enumerated() {
+            word.append(String(character), sourceID: "ru", at: caret)
+        }
+        XCTAssertEqual(word.text, "привет ")
+        XCTAssertEqual(word.expectedCaret, 7)
+        XCTAssertEqual(lastWordRange(in: "привет ", caret: 7, matchingRecent: word.text),
+                       NSRange(location: 0, length: 7))
+    }
+
+    func testPasteboardRestoresTextAndOtherRepresentations() {
+        let board = NSPasteboard.withUniqueName()
+        defer { board.releaseGlobally() }
+        let textAndURL = NSPasteboardItem()
+        textAndURL.setString("макс", forType: .string)
+        textAndURL.setString("https://example.com", forType: .URL)
+        let secondItem = NSPasteboardItem()
+        let dataType = NSPasteboard.PasteboardType("com.example.binary")
+        secondItem.setData(Data([3, 1, 4]), forType: dataType)
+        XCTAssertTrue(board.writeObjects([textAndURL, secondItem]))
+
+        let edit = PasteboardTransaction(pasteboard: board)
+        XCTAssertEqual(edit?.stage("ghbdtn "), true)
+        XCTAssertEqual(board.string(forType: .string), "ghbdtn ")
+        edit?.restore()
+
+        XCTAssertEqual(board.string(forType: .string), "макс")
+        XCTAssertEqual(board.string(forType: .URL), "https://example.com")
+        XCTAssertEqual(board.pasteboardItems?.count, 2)
+        XCTAssertEqual(board.pasteboardItems?.last?.data(forType: dataType), Data([3, 1, 4]))
+    }
+
+    func testPasteboardRestoresAnEmptyBoard() {
+        let board = NSPasteboard.withUniqueName()
+        defer { board.releaseGlobally() }
+        let edit = PasteboardTransaction(pasteboard: board)
+        XCTAssertEqual(edit?.stage("ghbdtn "), true)
+        XCTAssertEqual(edit?.ownsTemporaryText, true)
+        edit?.restore()
+        XCTAssertTrue(board.pasteboardItems?.isEmpty ?? true)
+        XCTAssertNil(board.string(forType: .string))
+    }
+
+    func testPasteboardKeepsContentsCopiedDuringTheEdit() {
+        let board = NSPasteboard.withUniqueName()
+        defer { board.releaseGlobally() }
+        board.setString("макс", forType: .string)
+        let edit = PasteboardTransaction(pasteboard: board)
+        XCTAssertEqual(edit?.stage("ghbdtn "), true)
+        board.clearContents()
+        board.setString("новое", forType: .string)
+        XCTAssertEqual(edit?.ownsTemporaryText, false)
+        edit?.restore()
+        XCTAssertEqual(board.string(forType: .string), "новое")
+    }
+
+    func testPasteboardDoesNotStageOverNewerContents() {
+        let board = NSPasteboard.withUniqueName()
+        defer { board.releaseGlobally() }
+        board.setString("макс", forType: .string)
+        let edit = PasteboardTransaction(pasteboard: board)
+        board.clearContents()
+        board.setString("новое", forType: .string)
+        XCTAssertEqual(edit?.stage("ghbdtn "), false)
+        XCTAssertEqual(board.string(forType: .string), "новое")
+    }
+
+    func testPasteboardDeclinesFilePromises() {
+        let board = NSPasteboard.withUniqueName()
+        defer { board.releaseGlobally() }
+        let promise = NSPasteboard.PasteboardType("com.apple.pasteboard.promised-file-url")
+        board.setString("file:///example-file", forType: promise)
+        XCTAssertNil(PasteboardTransaction(pasteboard: board))
+        XCTAssertEqual(board.string(forType: promise), "file:///example-file")
+    }
+
+    func testNativeTextPasteReplacesWholeWordAndRestoresClipboard() {
+        let board = NSPasteboard.withUniqueName()
+        defer { board.releaseGlobally() }
+        XCTAssertTrue(board.setString("макс", forType: .string))
+        let editor = NSTextView(frame: .zero)
+        editor.string = "тест привет "
+        let layouts = KeyboardLayouts().enabled
+        guard let ru = layouts.first(where: { $0.id == "com.apple.keylayout.Russian" }),
+              let en = layouts.first(where: { $0.id == "com.apple.keylayout.ABC" || $0.id == "com.apple.keylayout.US" })
+        else {
+            print("SKIP: ABC and Russian must be enabled for the native paste check")
+            return
+        }
+        guard let range = lastWordRange(in: editor.string, caret: 12, matchingRecent: "ривет "),
+              let swiftRange = Range(range, in: editor.string),
+              let correction = ru.convert(String(editor.string[swiftRange]), to: en)
+        else {
+            check(false, "expected a complete word and layout conversion", file: #filePath, line: #line)
+            return
+        }
+        editor.setSelectedRange(range)
+        let edit = PasteboardTransaction(pasteboard: board)
+        XCTAssertEqual(edit?.stage(correction), true)
+        XCTAssertTrue(editor.readSelection(from: board, type: .string))
+        edit?.restore()
+        XCTAssertEqual(editor.string, "тест ghbdtn ")
+        XCTAssertEqual(board.string(forType: .string), "макс")
     }
 }

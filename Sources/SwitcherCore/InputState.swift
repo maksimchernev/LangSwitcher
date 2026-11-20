@@ -6,10 +6,17 @@ public struct TypedWord {
     public private(set) var expectedCaret: Int?
     public private(set) var strokes: [KeyboardStroke?] = []
     private var discardedLongWord = false
+    private var caretBeforeLastInput: Int?
     public init() {}
     public mutating func append(_ characters: String, sourceID: String, at caret: Int? = nil, stroke: KeyboardStroke? = nil) {
-        if let caret, let expectedCaret, caret != expectedCaret { reset() }
         if self.sourceID != sourceID { reset() }
+        var insertionCaret = caret
+        if let caret, let expectedCaret, caret != expectedCaret {
+            // The editor can expose the caret from just before the preceding keystroke.
+            // Conversion still requires the predicted caret and actual text to agree.
+            if caret == caretBeforeLastInput { insertionCaret = expectedCaret }
+            else { reset() }
+        }
         for character in characters {
             if character == "\n" || character == "\r" || character == "\t" {
                 reset()
@@ -31,7 +38,10 @@ public struct TypedWord {
                 discardedLongWord = true
             }
         }
-        if let caret, !text.isEmpty { expectedCaret = caret + characters.utf16.count }
+        if let insertionCaret, !text.isEmpty, insertionCaret <= Int.max - characters.utf16.count {
+            caretBeforeLastInput = insertionCaret
+            expectedCaret = insertionCaret + characters.utf16.count
+        }
     }
     public mutating func backspace(at caret: Int? = nil) {
         if let caret, let expectedCaret, caret != expectedCaret { reset(); return }
@@ -39,6 +49,7 @@ public struct TypedWord {
         let removed = text.removeLast()
         if !strokes.isEmpty { strokes.removeLast() }
         if let expectedCaret { self.expectedCaret = expectedCaret - removed.utf16.count }
+        caretBeforeLastInput = nil
         if text.isEmpty { sourceID = nil }
     }
     public mutating func reset() {
@@ -46,6 +57,7 @@ public struct TypedWord {
         strokes = []
         sourceID = nil
         expectedCaret = nil
+        caretBeforeLastInput = nil
         discardedLongWord = false
     }
     public mutating func replace(with text: String, sourceID: String, caret: Int? = nil, strokes: [KeyboardStroke?] = []) {
