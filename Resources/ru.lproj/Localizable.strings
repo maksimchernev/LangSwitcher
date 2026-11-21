@@ -1,0 +1,21 @@
+"shortcut.leftOption" = "Левый Option ⌥";
+"shortcut.rightOption" = "Правый Option ⌥";
+"shortcut.leftControl" = "Левый Control ⌃";
+"shortcut.rightControl" = "Правый Control ⌃";
+
+"status.accessibility" = "Нужен Универсальный доступ";
+"status.keyboard" = "Нужен доступ к клавиатуре";
+"status.paste" = "Нужно разрешить вставку текста";
+"status.ready" = "Работает · %@";
+
+"menu.requestAccess" = "Разрешить работу…";
+"menu.openPermissionSettings" = "Открыть настройки доступа…";
+"menu.addLayout" = "Добавьте вторую раскладку в macOS";
+"menu.systemLayouts" = "Системные раскладки";
+"menu.shortcut" = "Клавиша исправления";
+"menu.launchAtLogin" = "Запускать при входе";
+"menu.about" = "О LangSwitcher";
+"menu.quit" = "Выйти";
+
+"login.failure" = "Не удалось изменить автозапуск";
+"about.instructions" = "Нажмите и отпустите клавишу «%@», чтобы исправить выделенный текст или последнее набранное слово.\n\nПовторное нажатие переключает на следующую раскладку. LangSwitcher забывает последнее исправление, когда вы выходите из поля ввода.\n\nLangSwitcher использует системные раскладки macOS и восстанавливает буфер обмена после вставки.";

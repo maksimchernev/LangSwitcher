@@ -1,0 +1,21 @@
+"shortcut.leftOption" = "Left Option ⌥";
+"shortcut.rightOption" = "Right Option ⌥";
+"shortcut.leftControl" = "Left Control ⌃";
+"shortcut.rightControl" = "Right Control ⌃";
+
+"status.accessibility" = "Accessibility access required";
+"status.keyboard" = "Input Monitoring access required";
+"status.paste" = "Text insertion access required";
+"status.ready" = "Active · %@";
+
+"menu.requestAccess" = "Request Access…";
+"menu.openPermissionSettings" = "Open Permission Settings…";
+"menu.addLayout" = "Add a second keyboard layout in macOS";
+"menu.systemLayouts" = "System Layouts";
+"menu.shortcut" = "Correction Shortcut";
+"menu.launchAtLogin" = "Launch at Login";
+"menu.about" = "About LangSwitcher";
+"menu.quit" = "Quit";
+
+"login.failure" = "Couldn’t change the launch at login setting";
+"about.instructions" = "Tap and release %@ to fix selected text or the last word you typed.\n\nTap again to cycle through layouts. LangSwitcher forgets the last correction when you leave the text field.\n\nLangSwitcher uses your macOS keyboard layouts and restores your clipboard after pasting.";

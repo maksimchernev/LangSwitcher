@@ -4,7 +4,7 @@
 
 Fix text typed with the wrong keyboard layout on macOS. Type `ghbdtn`, then tap and release **left Option (⌥)**. LangSwitcher replaces it with `привет` and switches your keyboard to Russian so you can keep typing.
 
-LangSwitcher lives in the menu bar and runs on demand. It uses the keyboard layouts already enabled in macOS.
+LangSwitcher lives in the menu bar and runs on demand. It uses the keyboard layouts already enabled in macOS. The interface follows your preferred languages in macOS and defaults to English when neither English nor Russian is preferred.
 
 ## Build and install
 
@@ -17,11 +17,11 @@ bash scripts/build.sh
 ```
 
 1. Move `dist/LangSwitcher.app` to **Applications** and open it.
-2. Choose **Разрешить работу…** (Request Access) in the LangSwitcher menu and enable LangSwitcher in **System Settings → Privacy & Security → Accessibility**. If macOS skips the prompt, use **Открыть настройки доступа…** (Open Permission Settings) to get to the right page.
+2. Choose **Request Access…** in the LangSwitcher menu and enable LangSwitcher in **System Settings → Privacy & Security → Accessibility**. If macOS skips the prompt, use **Open Permission Settings…** to get to the right page.
 3. If the menu says it still needs keyboard access, choose **Request Access** again and enable LangSwitcher under **Privacy & Security → Input Monitoring**, then quit and reopen it.
-4. Make sure at least two keyboard layouts are enabled under **System Settings → Keyboard → Text Input → Edit**. The **Системные раскладки** (System Layouts) submenu lists the layouts LangSwitcher can use.
+4. Make sure at least two keyboard layouts are enabled under **System Settings → Keyboard → Text Input → Edit**. The **System Layouts** submenu lists the layouts LangSwitcher can use.
 
-The app is signed locally during the build. After replacing an older build, quit it and open the new copy. If macOS still reports missing access, remove the old LangSwitcher entry from Accessibility and add the new app. Menu labels are currently in Russian. Look for the **A** and **Я** keys in the menu bar. The menu shows the current permission status.
+The app is signed locally during the build. After replacing an older build, quit it and open the new copy. If macOS still reports missing access, remove the old LangSwitcher entry from Accessibility and add the new app. Look for the **A** and **Я** keys in the menu bar. The menu shows the current permission status.
 
 ## Use it
 
@@ -31,7 +31,7 @@ The app is signed locally during the build. After replacing an older build, quit
 | Part of a word, a phrase, or multiple lines | Select the text first, then tap left Option. |
 | The same text again | Tap left Option again before editing or leaving the field. With two layouts, this restores the original text and input language. |
 
-With more than two layouts, repeated taps cycle through the layouts that change the text. Option shortcuts such as **⌥←** still work as usual. Use **Клавиша исправления** in the menu to change the shortcut, or **Запускать при входе** to start LangSwitcher at login.
+With more than two layouts, repeated taps cycle through the layouts that change the text. Option shortcuts such as **⌥←** still work as usual. Use **Correction Shortcut** in the menu to change the shortcut, or **Launch at Login** to start LangSwitcher at login.
 
 ## Compatibility and privacy
 

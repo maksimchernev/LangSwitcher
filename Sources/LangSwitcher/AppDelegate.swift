@@ -8,10 +8,10 @@ enum Shortcut: String, CaseIterable {
     case leftOption, rightOption, leftControl, rightControl, f18, f19
     var title: String {
         switch self {
-        case .leftOption: return "Левый Option ⌥"
-        case .rightOption: return "Правый Option ⌥"
-        case .leftControl: return "Левый Control ⌃"
-        case .rightControl: return "Правый Control ⌃"
+        case .leftOption: return NSLocalizedString("shortcut.leftOption", comment: "")
+        case .rightOption: return NSLocalizedString("shortcut.rightOption", comment: "")
+        case .leftControl: return NSLocalizedString("shortcut.leftControl", comment: "")
+        case .rightControl: return NSLocalizedString("shortcut.rightControl", comment: "")
         case .f18: return "F18"
         case .f19: return "F19"
         }
@@ -338,15 +338,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let trusted = AXIsProcessTrusted()
         let canPost = trusted && CGPreflightPostEventAccess()
         let label: String
-        if !trusted { label = "Нужен Универсальный доступ" }
-        else if monitorError { label = "Нужен доступ к клавиатуре" }
-        else if !canPost { label = "Нужно разрешить вставку текста" }
-        else { label = "Работает · \(shortcut.title)" }
+        if !trusted {
+            label = NSLocalizedString("status.accessibility", comment: "")
+        } else if monitorError {
+            label = NSLocalizedString("status.keyboard", comment: "")
+        } else if !canPost {
+            label = NSLocalizedString("status.paste", comment: "")
+        } else {
+            label = String.localizedStringWithFormat(NSLocalizedString("status.ready", comment: ""), shortcut.title)
+        }
         menu.addItem(withTitle: label, action: nil, keyEquivalent: "")
         menu.addItem(.separator())
         if !canPost || monitorError {
-            addItem("Разрешить работу…", action: #selector(requestPermissions), to: menu)
-            addItem("Открыть настройки доступа…", action: #selector(openPermissions), to: menu)
+            addItem(NSLocalizedString("menu.requestAccess", comment: ""), action: #selector(requestPermissions), to: menu)
+            addItem(NSLocalizedString("menu.openPermissionSettings", comment: ""), action: #selector(openPermissions), to: menu)
             menu.addItem(.separator())
         }
         layouts.refresh()
@@ -357,9 +362,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             languageMenu.addItem(item)
         }
         if layouts.enabled.count < 2 {
-            languageMenu.addItem(withTitle: "Добавьте вторую раскладку в macOS", action: nil, keyEquivalent: "")
+            languageMenu.addItem(withTitle: NSLocalizedString("menu.addLayout", comment: ""), action: nil, keyEquivalent: "")
         }
-        let languages = NSMenuItem(title: "Системные раскладки", action: nil, keyEquivalent: "")
+        let languages = NSMenuItem(title: NSLocalizedString("menu.systemLayouts", comment: ""), action: nil, keyEquivalent: "")
         languages.submenu = languageMenu
         menu.addItem(languages)
         let shortcutMenu = NSMenu()
@@ -370,14 +375,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             item.state = choice == shortcut ? .on : .off
             shortcutMenu.addItem(item)
         }
-        let shortcutItem = NSMenuItem(title: "Клавиша исправления", action: nil, keyEquivalent: "")
+        let shortcutItem = NSMenuItem(title: NSLocalizedString("menu.shortcut", comment: ""), action: nil, keyEquivalent: "")
         shortcutItem.submenu = shortcutMenu
         menu.addItem(shortcutItem)
-        let login = addItem("Запускать при входе", action: #selector(toggleLogin), to: menu)
+        let login = addItem(NSLocalizedString("menu.launchAtLogin", comment: ""), action: #selector(toggleLogin), to: menu)
         login.state = SMAppService.mainApp.status == .enabled ? .on : .off
         menu.addItem(.separator())
-        addItem("О LangSwitcher", action: #selector(about), to: menu)
-        addItem("Выйти", action: #selector(quit), to: menu)
+        addItem(NSLocalizedString("menu.about", comment: ""), action: #selector(about), to: menu)
+        addItem(NSLocalizedString("menu.quit", comment: ""), action: #selector(quit), to: menu)
         status.button?.toolTip = "LangSwitcher — \(label)"
         status.button?.setAccessibilityLabel("LangSwitcher. \(label)")
     }
@@ -423,7 +428,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             else { try SMAppService.mainApp.register() }
         } catch {
             let alert = NSAlert()
-            alert.messageText = "Не удалось изменить автозапуск"
+            alert.messageText = NSLocalizedString("login.failure", comment: "")
             alert.informativeText = error.localizedDescription
             alert.runModal()
         }
@@ -433,7 +438,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @objc private func about() {
         let alert = NSAlert()
         alert.messageText = "LangSwitcher"
-        alert.informativeText = "Нажмите и отпустите \(shortcut.title), чтобы исправить выделение или последнее набранное слово.\n\nПовторное нажатие переключает обратно. После выхода из поля история стирается.\n\nИспользуются системные раскладки macOS. После вставки содержимое буфера обмена восстанавливается."
+        alert.informativeText = String.localizedStringWithFormat(
+            NSLocalizedString("about.instructions", comment: ""), shortcut.title
+        )
         alert.runModal()
     }
 
