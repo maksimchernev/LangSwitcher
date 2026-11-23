@@ -81,17 +81,34 @@ struct TextField {
 
 enum TextAccess {
     static func focusedField() -> TextField? {
-        guard AXIsProcessTrusted(), !IsSecureEventInputEnabled(),
-              let front = NSWorkspace.shared.frontmostApplication,
+        guard AXIsProcessTrusted(), !IsSecureEventInputEnabled() else { return nil }
+
+        // Spotlight can keep keyboard focus while the previous app remains frontmost.
+        if let spotlight = NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.Spotlight").first,
+           let field = focusedField(in: spotlight.processIdentifier, requiresFocusedWindow: true),
+           field.attribute(kAXIdentifierAttribute) as? String == "SpotlightSearchField",
+           field.attribute(kAXFocusedAttribute) as? Bool == true {
+            return field
+        }
+
+        guard let front = NSWorkspace.shared.frontmostApplication,
               front.processIdentifier != getpid() else { return nil }
-        let app = AXUIElementCreateApplication(front.processIdentifier)
+        return focusedField(in: front.processIdentifier)
+    }
+
+    private static func focusedField(in pid: pid_t, requiresFocusedWindow: Bool = false) -> TextField? {
+        let app = AXUIElementCreateApplication(pid)
         AXUIElementSetMessagingTimeout(app, 0.12)
         var value: CFTypeRef?
+        if requiresFocusedWindow {
+            guard AXUIElementCopyAttributeValue(app, kAXFocusedWindowAttribute as CFString, &value) == .success,
+                  let value, CFGetTypeID(value) == AXUIElementGetTypeID() else { return nil }
+        }
         guard AXUIElementCopyAttributeValue(app, kAXFocusedUIElementAttribute as CFString, &value) == .success,
               let value, CFGetTypeID(value) == AXUIElementGetTypeID() else { return nil }
         let element = value as! AXUIElement
         AXUIElementSetMessagingTimeout(element, 0.12)
-        let focused = TextField(element: element, pid: front.processIdentifier)
+        let focused = TextField(element: element, pid: pid)
         guard !focused.isSecure else { return nil }
         if focused.isEditableText { return focused }
 
@@ -99,8 +116,8 @@ enum TextAccess {
         guard let parent = focused.attribute("AXEditableAncestor"),
               CFGetTypeID(parent) == AXUIElementGetTypeID() else { return nil }
         let container = parent as! AXUIElement
-        var pid: pid_t = 0
-        guard AXUIElementGetPid(container, &pid) == .success, pid == front.processIdentifier else { return nil }
+        var containerPID: pid_t = 0
+        guard AXUIElementGetPid(container, &containerPID) == .success, containerPID == pid else { return nil }
         AXUIElementSetMessagingTimeout(container, 0.12)
         let field = TextField(element: container, pid: pid)
         return field.isEditableText ? field : nil

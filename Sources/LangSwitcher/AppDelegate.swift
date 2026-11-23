@@ -81,6 +81,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         NSWorkspace.shared.notificationCenter.addObserver(self, selector: #selector(applicationChanged), name: NSWorkspace.sessionDidResignActiveNotification, object: nil)
         DistributedNotificationCenter.default().addObserver(self, selector: #selector(sourceChanged), name: Notification.Name(kTISNotifySelectedKeyboardInputSourceChanged as String), object: nil)
         DistributedNotificationCenter.default().addObserver(self, selector: #selector(sourceChanged), name: Notification.Name(kTISNotifyEnabledKeyboardInputSourcesChanged as String), object: nil)
+        DispatchQueue.main.async { InstallationPrompt.showIfNeeded() }
     }
 
     func applicationWillTerminate(_ notification: Notification) {
