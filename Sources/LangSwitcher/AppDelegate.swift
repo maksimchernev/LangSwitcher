@@ -54,6 +54,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var observedPID: pid_t?
     private var suppressedFunctionKey = false
     private var monitorError = false
+    private var accessibilityRestart = AccessibilityRestart(initiallyTrusted: AXIsProcessTrusted())
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // A second copy must never install another tap and convert the same word twice.
@@ -73,8 +74,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         startIfPermitted()
         timer = Timer.scheduledTimer(withTimeInterval: 0.2, repeats: true) { [weak self] _ in
             guard let self else { return }
-            if self.eventTap == nil, AXIsProcessTrusted() { self.startIfPermitted() }
+            let trusted = AXIsProcessTrusted()
+            if self.eventTap == nil, trusted { self.startIfPermitted() }
             self.checkFocus()
+            if self.accessibilityRestart.observe(trusted: trusted) {
+                AccessibilityRestart.showPrompt()
+            }
         }
         NSWorkspace.shared.notificationCenter.addObserver(self, selector: #selector(applicationChanged), name: NSWorkspace.didActivateApplicationNotification, object: nil)
         NSWorkspace.shared.notificationCenter.addObserver(self, selector: #selector(applicationChanged), name: NSWorkspace.screensDidSleepNotification, object: nil)
@@ -350,8 +355,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(withTitle: label, action: nil, keyEquivalent: "")
         menu.addItem(.separator())
         if !canPost || monitorError {
-            addItem(NSLocalizedString("menu.requestAccess", comment: ""), action: #selector(requestPermissions), to: menu)
-            addItem(NSLocalizedString("menu.openPermissionSettings", comment: ""), action: #selector(openPermissions), to: menu)
+            addItem(NSLocalizedString("menu.configureAccess", comment: ""), action: #selector(configurePermissions), to: menu)
             menu.addItem(.separator())
         }
         layouts.refresh()
@@ -403,20 +407,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         updateMenu()
     }
 
-    @objc private func requestPermissions() {
+    @objc private func configurePermissions() {
+        let anchor: String
         if !AXIsProcessTrusted() {
             let promptKey = kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String
             let options = [promptKey: true] as CFDictionary
-            _ = AXIsProcessTrustedWithOptions(options)
+            guard !AXIsProcessTrustedWithOptions(options) else { return }
+            anchor = "Privacy_Accessibility"
         } else if monitorError {
-            if CGRequestListenEventAccess() { startIfPermitted() }
-        } else if !CGPreflightPostEventAccess() {
-            _ = CGRequestPostEventAccess()
+            if CGRequestListenEventAccess() {
+                startIfPermitted()
+                return
+            }
+            anchor = "Privacy_ListenEvent"
+        } else {
+            guard !CGPreflightPostEventAccess(), !CGRequestPostEventAccess() else { return }
+            anchor = "Privacy_Accessibility"
         }
-    }
-
-    @objc private func openPermissions() {
-        let anchor = AXIsProcessTrusted() && monitorError ? "Privacy_ListenEvent" : "Privacy_Accessibility"
         if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?\(anchor)") {
             NSWorkspace.shared.open(url)
         }
