@@ -6,6 +6,8 @@ Fix text typed with the wrong keyboard layout on macOS. Type `ghbdtn`, then tap 
 
 LangSwitcher lives in the menu bar and runs on demand. It uses the keyboard layouts already enabled in macOS. The interface follows your preferred languages in macOS and defaults to English when neither English nor Russian is preferred.
 
+[**Download LangSwitcher.dmg**](https://github.com/maksimchernev/LangSwitcher/releases/latest/download/LangSwitcher.dmg). Open the disk image and drag LangSwitcher into **Applications**.
+
 ## Build and install
 
 The app runs on **Apple silicon** with **macOS 13 or later**. Building requires **Swift 6** and the **macOS 15.4 SDK or later**, available with Xcode or Xcode Command Line Tools.
