@@ -17,10 +17,5 @@
 "menu.about" = "About LangSwitcher";
 "menu.quit" = "Quit";
 
-"installation.title" = "Move LangSwitcher to Applications";
-"installation.instructions" = "Quit LangSwitcher, drag it into the Applications folder, then open it from there.";
-"installation.openApplications" = "Open Applications Folder";
-"installation.later" = "Later";
-
 "login.failure" = "Couldn’t change the launch at login setting";
 "about.instructions" = "Tap and release %@ to fix selected text or the last word you typed.\n\nTap again to cycle through layouts. LangSwitcher forgets the last correction when you leave the text field.\n\nLangSwitcher uses your macOS keyboard layouts and restores your clipboard after pasting.";
