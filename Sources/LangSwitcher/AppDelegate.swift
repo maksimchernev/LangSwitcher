@@ -4,42 +4,14 @@ import Carbon
 import ServiceManagement
 import SwitcherCore
 
-enum Shortcut: String, CaseIterable {
-    case leftOption, rightOption, leftControl, rightControl, f18, f19
-    var title: String {
-        switch self {
-        case .leftOption: return NSLocalizedString("shortcut.leftOption", comment: "")
-        case .rightOption: return NSLocalizedString("shortcut.rightOption", comment: "")
-        case .leftControl: return NSLocalizedString("shortcut.leftControl", comment: "")
-        case .rightControl: return NSLocalizedString("shortcut.rightControl", comment: "")
-        case .f18: return "F18"
-        case .f19: return "F19"
-        }
-    }
-    var keyCode: Int64 {
-        switch self {
-        case .leftOption: return 58
-        case .rightOption: return 61
-        case .leftControl: return 59
-        case .rightControl: return 62
-        case .f18: return 79
-        case .f19: return 80
-        }
-    }
-    var modifier: CGEventFlags? {
-        switch self {
-        case .leftOption, .rightOption: return .maskAlternate
-        case .leftControl, .rightControl: return .maskControl
-        case .f18, .f19: return nil
-        }
-    }
-}
-
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let layouts = KeyboardLayouts()
     private var word = TypedWord()
     private var tap = ModifierTap()
-    private var shortcut = Shortcut(rawValue: UserDefaults.standard.string(forKey: "shortcut") ?? "") ?? .leftOption
+    private var shortcuts = Shortcut.restore(
+        saved: UserDefaults.standard.stringArray(forKey: "shortcuts"),
+        legacy: UserDefaults.standard.string(forKey: "shortcut")
+    )
     private var field: TextField?
     private var eventTap: CFMachPort?
     private var eventSource: CFRunLoopSource?
@@ -52,7 +24,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var gestureField: TextField?
     private var focusObserver: AXObserver?
     private var observedPID: pid_t?
-    private var suppressedFunctionKey = false
     private var monitorError = false
     private var accessibilityRestart = AccessibilityRestart(initiallyTrusted: AXIsProcessTrusted())
 
@@ -105,7 +76,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private func startIfPermitted() {
         guard eventTap == nil, AXIsProcessTrusted() else { return }
-        let types: [CGEventType] = [.keyDown, .keyUp, .flagsChanged, .leftMouseDown, .rightMouseDown, .otherMouseDown, .scrollWheel]
+        let types: [CGEventType] = [.keyDown, .flagsChanged, .leftMouseDown, .rightMouseDown, .otherMouseDown, .scrollWheel]
         let mask = types.reduce(CGEventMask(0)) { $0 | (CGEventMask(1) << $1.rawValue) }
         let pointer = Unmanaged.passUnretained(self).toOpaque()
         guard let port = CGEvent.tapCreate(tap: .cgSessionEventTap, place: .headInsertEventTap, options: .defaultTap, eventsOfInterest: mask, callback: { _, type, event, pointer in
@@ -141,37 +112,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         if type == .flagsChanged {
             checkFocus()
-            if code == shortcut.keyCode, let modifier = shortcut.modifier {
-                if flags.contains(modifier) {
-                    gestureField = field
-                    tap.press(alone: flags == modifier && field != nil,
-                              otherKeysDown: otherKeysDown(excluding: code), mouseDown: mouseDown())
-                } else if tap.release(), let gestureField {
+            guard let shortcut = shortcuts.first(where: { $0.keyCode == code }) else {
+                tap.cancel()
+                gestureField = nil
+                return false
+            }
+            if shortcut.isPressed(with: event.flags) {
+                gestureField = field
+                let alone = flags == shortcut.modifier && field != nil
+                    && !shortcut.isOtherSideDown(with: event.flags)
+                tap.press(keyCode: code, alone: alone,
+                          otherKeysDown: otherKeysDown(excluding: code), mouseDown: mouseDown())
+            } else {
+                if tap.release(keyCode: code), let gestureField {
                     scheduleConversion(for: gestureField)
                 }
-            } else {
-                tap.cancel()
-            }
-            return false
-        }
-        if type == .keyUp {
-            if code == shortcut.keyCode, suppressedFunctionKey {
-                suppressedFunctionKey = false
-                return true
+                gestureField = nil
             }
             return false
         }
         guard type == .keyDown else { return false }
         tap.cancel()
-        if shortcut.modifier == nil, code == shortcut.keyCode, flags.subtracting(.maskSecondaryFn).isEmpty,
-           !otherKeysDown(excluding: code), !mouseDown() {
-            if event.getIntegerValueField(.keyboardEventAutorepeat) == 0 {
-                checkFocus()
-                if let field { scheduleConversion(for: field) }
-            }
-            suppressedFunctionKey = true
-            return true
-        }
         pendingEdit?.beforeUserKey()
         revision += 1
         history = nil
@@ -349,8 +310,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             label = NSLocalizedString("status.keyboard", comment: "")
         } else if !canPost {
             label = NSLocalizedString("status.paste", comment: "")
-        } else {
+        } else if shortcuts.count == 1, let shortcut = shortcuts.first {
             label = String.localizedStringWithFormat(NSLocalizedString("status.ready", comment: ""), shortcut.title)
+        } else {
+            label = String.localizedStringWithFormat(NSLocalizedString("status.readyMultiple", comment: ""), shortcuts.count)
         }
         menu.addItem(withTitle: label, action: nil, keyEquivalent: "")
         menu.addItem(.separator())
@@ -372,11 +335,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         languages.submenu = languageMenu
         menu.addItem(languages)
         let shortcutMenu = NSMenu()
+        shortcutMenu.autoenablesItems = false
         for choice in Shortcut.allCases {
-            let item = NSMenuItem(title: choice.title, action: #selector(changeShortcut(_:)), keyEquivalent: "")
+            let item = NSMenuItem(title: choice.title, action: #selector(toggleShortcut(_:)), keyEquivalent: "")
             item.target = self
             item.representedObject = choice.rawValue
-            item.state = choice == shortcut ? .on : .off
+            let selected = shortcuts.contains(choice)
+            item.state = selected ? .on : .off
+            item.isEnabled = !selected || shortcuts.count > 1
             shortcutMenu.addItem(item)
         }
         let shortcutItem = NSMenuItem(title: NSLocalizedString("menu.shortcut", comment: ""), action: nil, keyEquivalent: "")
@@ -398,11 +364,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         return item
     }
 
-    @objc private func changeShortcut(_ sender: NSMenuItem) {
+    @objc private func toggleShortcut(_ sender: NSMenuItem) {
         guard let raw = sender.representedObject as? String, let choice = Shortcut(rawValue: raw) else { return }
-        shortcut = choice
-        UserDefaults.standard.set(raw, forKey: "shortcut")
-        tap.cancel()
+        if shortcuts.contains(choice) {
+            guard shortcuts.count > 1 else { return }
+            shortcuts.remove(choice)
+        } else {
+            shortcuts.insert(choice)
+        }
+        let saved = Shortcut.allCases.filter(shortcuts.contains).map(\.rawValue)
+        UserDefaults.standard.set(saved, forKey: "shortcuts")
         reset()
         updateMenu()
     }
@@ -445,9 +416,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @objc private func about() {
         let alert = NSAlert()
         alert.messageText = "LangSwitcher"
-        alert.informativeText = String.localizedStringWithFormat(
-            NSLocalizedString("about.instructions", comment: ""), shortcut.title
-        )
+        alert.informativeText = NSLocalizedString("about.instructions", comment: "")
         alert.runModal()
     }
 

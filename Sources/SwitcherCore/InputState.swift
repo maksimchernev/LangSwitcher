@@ -71,14 +71,14 @@ public struct TypedWord {
 }
 
 public struct ModifierTap {
-    private var armed = false
+    private var armedKey: Int64?
     public init() {}
-    public mutating func press(alone: Bool, otherKeysDown: Bool = false, mouseDown: Bool = false) {
-        armed = alone && !otherKeysDown && !mouseDown
+    public mutating func press(keyCode: Int64, alone: Bool, otherKeysDown: Bool = false, mouseDown: Bool = false) {
+        armedKey = alone && !otherKeysDown && !mouseDown ? keyCode : nil
     }
-    public mutating func cancel() { armed = false }
-    public mutating func release() -> Bool {
-        defer { armed = false }
-        return armed
+    public mutating func cancel() { armedKey = nil }
+    public mutating func release(keyCode: Int64) -> Bool {
+        defer { cancel() }
+        return armedKey == keyCode
     }
 }

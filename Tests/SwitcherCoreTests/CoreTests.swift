@@ -107,18 +107,24 @@ func check(_ condition: Bool, _ message: String, file: StaticString, line: UInt)
 
     func testStandaloneModifierFiresOnce() {
         var tap = ModifierTap()
-        tap.press(alone: true)
-        XCTAssertTrue(tap.release())
-        XCTAssertFalse(tap.release())
+        tap.press(keyCode: 58, alone: true)
+        XCTAssertTrue(tap.release(keyCode: 58))
+        XCTAssertFalse(tap.release(keyCode: 58))
+
+        tap.press(keyCode: 58, alone: true)
+        XCTAssertFalse(tap.release(keyCode: 61))
+        XCTAssertFalse(tap.release(keyCode: 58))
+        tap.press(keyCode: 61, alone: true)
+        XCTAssertTrue(tap.release(keyCode: 61))
     }
 
     func testCombinationAndMouseCancelModifier() {
         var tap = ModifierTap()
-        tap.press(alone: true)
+        tap.press(keyCode: 58, alone: true)
         tap.cancel()
-        XCTAssertFalse(tap.release())
-        tap.press(alone: false)
-        XCTAssertFalse(tap.release())
+        XCTAssertFalse(tap.release(keyCode: 58))
+        tap.press(keyCode: 58, alone: false)
+        XCTAssertFalse(tap.release(keyCode: 58))
     }
 
     func testLongInputIsBoundedWithoutKeepingPartialWord() {
@@ -177,10 +183,10 @@ func check(_ condition: Bool, _ message: String, file: StaticString, line: UInt)
 
     func testAlreadyHeldKeyOrMousePreventsModifierTap() {
         var tap = ModifierTap()
-        tap.press(alone: true, otherKeysDown: true)
-        XCTAssertFalse(tap.release())
-        tap.press(alone: true, mouseDown: true)
-        XCTAssertFalse(tap.release())
+        tap.press(keyCode: 58, alone: true, otherKeysDown: true)
+        XCTAssertFalse(tap.release(keyCode: 58))
+        tap.press(keyCode: 58, alone: true, mouseDown: true)
+        XCTAssertFalse(tap.release(keyCode: 58))
     }
 
     func testMixedSelectionRoundTripIsExactAndEquivalentLayoutsAreSkipped() {

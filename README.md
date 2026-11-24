@@ -33,7 +33,7 @@ The app is signed locally during the build. After replacing an older build, quit
 | Part of a word, a phrase, or multiple lines | Select the text first, then tap left Option. |
 | The same text again | Tap left Option again before editing or leaving the field. With two layouts, this restores the original text and input language. |
 
-With more than two layouts, repeated taps cycle through the layouts that change the text. Option shortcuts such as **⌥←** still work as usual. Use **Correction Shortcut** in the menu to change the shortcut, or **Launch at Login** to start LangSwitcher at login.
+With more than two layouts, repeated taps cycle through the layouts that change the text. Option shortcuts such as **⌥←** still work as usual. Choose one or more keys under **Correction Keys**. Tap any one of them to make a correction. Use **Launch at Login** to start LangSwitcher at login.
 
 ## Compatibility and privacy
 
