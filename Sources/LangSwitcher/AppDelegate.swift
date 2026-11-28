@@ -5,8 +5,16 @@ import ServiceManagement
 import SwitcherCore
 
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
+    private struct ReplayStart {
+        let caret: TextField.ReplayCaret
+        let textLength: Int
+    }
+
     private let layouts = KeyboardLayouts()
     private var word = TypedWord()
+    private var replayStart: ReplayStart?
+    private var lastReplayKey: DispatchTime?
+    private var replayHistory: (word: TypedWord, start: ReplayStart)?
     private var tap = ModifierTap()
     private var shortcuts = Shortcut.restore(
         saved: UserDefaults.standard.stringArray(forKey: "shortcuts"),
@@ -18,7 +26,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var timer: Timer?
     private var status: NSStatusItem!
     private var revision = 0
-    private var pendingEdit: PasteEdit?
+    private var pendingEdit: PendingTextEdit?
     private var waitingToQuit = false
     private var history: (cycle: ConversionCycle, range: NSRange)?
     private var gestureField: TextField?
@@ -133,14 +141,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         guard type == .keyDown else { return false }
         tap.cancel()
-        pendingEdit?.beforeUserKey()
+        let changesClipboard = flags.contains(.maskCommand) && [Int64(kVK_ANSI_C), Int64(kVK_ANSI_X)].contains(code)
+        pendingEdit?.beforeUserKey(changesClipboard: changesClipboard)
         revision += 1
         history = nil
+        replayHistory = nil
         checkFocus()
-        guard let field, let selection = field.selection, !IsSecureEventInputEnabled() else { reset(); return false }
+        guard let field, !IsSecureEventInputEnabled() else { reset(); return false }
+        let isVSCodeEditor = field.isVSCodeEditor
+        let selection = field.selection
+        guard isVSCodeEditor || selection != nil else { reset(); return false }
+        let opaqueCaret = isVSCodeEditor && selection?.location == 0 && field.text?.isEmpty != false
+        let caret = opaqueCaret ? nil : selection?.location
         if !flags.intersection([.maskCommand, .maskControl, .maskAlternate]).isEmpty { reset(); return false }
-        if selection.length > 0 { word.reset() }
-        if code == 51 { word.backspace(at: selection.location); return false }
+        if (selection?.length ?? 0) > 0 { word.reset() }
+        if code == 51 {
+            replayStart = nil
+            word.backspace(at: caret)
+            return false
+        }
         // Navigation, Escape, Return and Tab invalidate the suffix, not the application's key.
         if [36, 48, 53, 76, 115, 116, 117, 119, 121, 123, 124, 125, 126].contains(code) {
             reset()
@@ -152,7 +171,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         else { reset(); return false }
         let stroke = KeyboardStroke(key: UInt16(code), shift: event.flags.contains(.maskShift),
                                     capsLock: event.flags.contains(.maskAlphaShift))
-        word.append(text, sourceID: sourceID, at: selection.location, stroke: stroke)
+        if word.text.isEmpty || word.sourceID != sourceID
+            || (word.text.last?.isWhitespace == true && !text.allSatisfy(\.isWhitespace)) {
+            replayStart = nil
+            if let caret = field.replayCaret, let text = field.text {
+                replayStart = ReplayStart(caret: caret, textLength: text.utf16.count)
+            }
+        }
+        word.append(text, sourceID: sourceID, at: caret, stroke: stroke)
+        lastReplayKey = .now()
         return false
     }
 
@@ -167,7 +194,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func reset() {
         cancelPendingEdit()
         word.reset()
+        replayStart = nil
+        lastReplayKey = nil
         history = nil
+        replayHistory = nil
         tap.cancel()
         gestureField = nil
         revision += 1
@@ -215,10 +245,109 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let triggeredAt = revision
         DispatchQueue.main.async { [weak self] in
             guard let self, self.pendingEdit == nil, self.revision == triggeredAt,
-                  self.stillFocused(expectedField),
-                  let snapshot = expectedField.snapshot(revision: triggeredAt) else { return }
-            self.convert(field: expectedField, snapshot: snapshot)
+                  self.stillFocused(expectedField) else { return }
+            if self.tryReplay(field: expectedField, revision: triggeredAt) { return }
+            let snapshot = expectedField.snapshot(revision: triggeredAt)
+            if let snapshot, !expectedField.isVSCodeEditor || self.history != nil ||
+                (!snapshot.text.isEmpty && self.word.expectedCaret == snapshot.selection.location) ||
+                (snapshot.selection.length > 0 && Range(snapshot.selection, in: snapshot.text) != nil) {
+                self.convert(field: expectedField, snapshot: snapshot)
+            } else if expectedField.isVSCodeEditor {
+                self.convertUsingClipboard(field: expectedField, revision: triggeredAt)
+            }
         }
+    }
+
+    private func tryReplay(field: TextField, revision: Int) -> Bool {
+        let input: (word: TypedWord, start: ReplayStart)
+        if let replayHistory {
+            input = replayHistory
+        } else {
+            guard let replayStart, let lastReplayKey, DispatchTime.now() <= lastReplayKey + .seconds(3) else { return false }
+            input = (word, replayStart)
+        }
+        guard let recordedSource = input.word.sourceID, layouts.currentID == recordedSource,
+              CGPreflightPostEventAccess(), field.canEdit else { return false }
+        layouts.refresh()
+        guard let source = layouts.enabled.first(where: { $0.id == recordedSource }) else { return false }
+        var cycle = ConversionCycle(text: input.word.text, sourceID: source.id, strokes: input.word.strokes)
+        guard let target = cycle.advance(in: layouts.enabled),
+              let replay = ReplayWord(word: input.word, source: source, target: target) else { return false }
+
+        let originalText = input.word.text
+        let units = input.start.caret.line == nil ? originalText.utf16.count : originalText.unicodeScalars.count
+        let (column, overflow) = input.start.caret.column.addingReportingOverflow(units)
+        let (expectedLength, lengthOverflow) = input.start.textLength.addingReportingOverflow(originalText.utf16.count)
+        guard !overflow, !lengthOverflow else { return false }
+        let expectedCaret = TextField.ReplayCaret(line: input.start.caret.line, column: column)
+        let stillValid = { [weak self] in
+            guard let self, self.revision == revision, self.stillFocused(field),
+                  field.replayCaret == expectedCaret,
+                  let text = field.text, text.utf16.count == expectedLength,
+                  let selection = field.selection, selection.length == 0,
+                  let range = lastWordRange(in: text, caret: selection.location, matchingRecent: originalText)
+            else { return false }
+            return range.length == originalText.utf16.count
+        }
+        guard stillValid() else { return false }
+
+        word.reset()
+        replayStart = nil
+        self.lastReplayKey = nil
+        history = nil
+        replayHistory = nil
+        let edit = ReplayEdit(field: field, word: replay, layouts: layouts, original: source, target: target,
+                              stillValid: stillValid, completion: { [weak self] sent in
+            guard let self else { return }
+            self.pendingEdit = nil
+            if self.waitingToQuit {
+                NSApp.reply(toApplicationShouldTerminate: true)
+                return
+            }
+            guard sent, self.revision == revision, self.stillFocused(field),
+                  self.layouts.currentID == target.id else { return }
+            var converted = TypedWord()
+            converted.replace(with: replay.text, sourceID: target.id, strokes: replay.strokes.map { Optional($0) })
+            self.replayHistory = (converted, input.start)
+        })
+        pendingEdit = edit
+        edit.start()
+        return true
+    }
+
+    private func convertUsingClipboard(field: TextField, revision: Int) {
+        layouts.refresh()
+        let recent = word
+        var conversion: (cycle: ConversionCycle, target: KeyboardLayout)?
+        let edit = ClipboardEdit(field: field, recent: recent.text, stillFocused: { [weak self] in
+            guard let self else { return false }
+            return self.revision == revision && self.stillFocused(field)
+        }, convert: { [weak self] text, isWord in
+            guard let self else { return nil }
+            let sourceID = isWord ? recent.sourceID : self.layouts.inferredSource(for: text, preferredID: self.layouts.currentID)?.id
+            guard let sourceID else { return nil }
+            let missingStrokes = max(0, text.count - recent.strokes.count)
+            let strokes = isWord ? Array<KeyboardStroke?>(repeating: nil, count: missingStrokes) + recent.strokes : []
+            var cycle = ConversionCycle(text: text, sourceID: sourceID, strokes: strokes)
+            guard let target = cycle.advance(in: self.layouts.enabled) else { return nil }
+            conversion = (cycle, target)
+            return cycle.text
+        }, completion: { [weak self] result in
+            guard let self else { return }
+            self.pendingEdit = nil
+            if self.waitingToQuit {
+                NSApp.reply(toApplicationShouldTerminate: true)
+                return
+            }
+            if result == .cancelled { return }
+            guard result == .pasted, let conversion, self.layouts.select(conversion.target) else {
+                self.reset()
+                return
+            }
+            self.word.replace(with: conversion.cycle.text, sourceID: conversion.target.id, strokes: conversion.cycle.strokes)
+        })
+        pendingEdit = edit
+        edit.start()
     }
 
     private func convert(field: TextField, snapshot: EditSnapshot) {
@@ -294,6 +423,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         layouts.refresh()
         if let sourceID = word.sourceID, sourceID != layouts.currentID { reset() }
         if let history, history.cycle.sourceID != layouts.currentID { reset() }
+        if let sourceID = replayHistory?.word.sourceID, sourceID != layouts.currentID { reset() }
     }
 
     func menuWillOpen(_ menu: NSMenu) { updateMenu() }

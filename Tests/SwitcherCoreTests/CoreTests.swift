@@ -1,4 +1,5 @@
 import AppKit
+import Carbon
 import Foundation
 import SwitcherCore
 
@@ -50,8 +51,33 @@ func check(_ condition: Bool, _ message: String, file: StaticString, line: UInt)
         tests.testPasteboardDoesNotStageOverNewerContents()
         tests.testPasteboardDeclinesFilePromises()
         tests.testNativeTextPasteReplacesWholeWordAndRestoresClipboard()
-        print("25 scenarios; \(failures) failed assertions")
+        tests.testFindsWordAtCaretInCopiedLine()
+        tests.testReplayRequiresRealPhysicalStrokes()
+        tests.testPasteboardRestoresAfterCapturingEditorCopy()
+        print("28 scenarios; \(failures) failed assertions")
         if failures > 0 { exit(1) }
+    }
+    func testReplayRequiresRealPhysicalStrokes() {
+        let layouts = KeyboardLayouts()
+        guard let abc = layouts.enabled.first(where: { $0.id == "com.apple.keylayout.ABC" }),
+              let russian = layouts.enabled.first(where: { $0.id == "com.apple.keylayout.Russian" }) else { return }
+        let keys = [kVK_ANSI_G, kVK_ANSI_H, kVK_ANSI_B, kVK_ANSI_D, kVK_ANSI_T, kVK_ANSI_N]
+        var word = TypedWord()
+        for (letter, key) in zip("Ghbdtn", keys) {
+            let stroke = KeyboardStroke(key: UInt16(key), shift: letter.isUppercase)
+            word.append(String(letter), sourceID: abc.id, stroke: stroke)
+        }
+        XCTAssertEqual(ReplayWord(word: word, source: abc, target: russian)?.text, "Привет")
+        word.append(" ", sourceID: abc.id, stroke: KeyboardStroke(key: UInt16(kVK_Space)))
+        XCTAssertEqual(ReplayWord(word: word, source: abc, target: russian)?.text, "Привет ")
+        word.append("x", sourceID: abc.id)
+        XCTAssertNil(ReplayWord(word: word, source: abc, target: russian))
+    }
+    func testFindsWordAtCaretInCopiedLine() {
+        XCTAssertEqual(wordInCopiedLine("до ghbdtn после\n", column: 10, tabSize: nil, recent: "ghbdtn"), "ghbdtn")
+        XCTAssertEqual(wordInCopiedLine("\t🙂 ghbdtn после\r\n", column: 13, tabSize: 4, recent: "ghbdtn"), "ghbdtn")
+        XCTAssertNil(wordInCopiedLine("до ghbdtn после\n", column: 16, tabSize: nil, recent: "ghbdtn"))
+        XCTAssertNil(wordInCopiedLine("до ghbdtn\nпосле\n", column: 10, tabSize: nil, recent: "ghbdtn"))
     }
     func testTracksOnlyWordAfterLastSpace() {
         var word = TypedWord()
@@ -286,6 +312,27 @@ func check(_ condition: Bool, _ message: String, file: StaticString, line: UInt)
         XCTAssertEqual(edit?.ownsTemporaryText, false)
         edit?.restore()
         XCTAssertEqual(board.string(forType: .string), "новое")
+    }
+
+    func testPasteboardRestoresAfterCapturingEditorCopy() {
+        let board = NSPasteboard.withUniqueName()
+        defer { board.releaseGlobally() }
+        XCTAssertTrue(board.setString("исходный буфер", forType: .string))
+        guard let edit = PasteboardTransaction(pasteboard: board), let baseline = edit.copyBaseline else {
+            check(false, "expected a clipboard snapshot", file: #filePath, line: #line)
+            return
+        }
+        board.clearContents()
+        XCTAssertTrue(board.setString("ghbdtn", forType: .string))
+        guard case .copied(let text) = edit.observeCopy(after: baseline, accepts: { _ in true }) else {
+            check(false, "expected the copy from the editor", file: #filePath, line: #line)
+            return
+        }
+        XCTAssertEqual(text, "ghbdtn")
+        XCTAssertEqual(edit.stage("привет"), true)
+        XCTAssertTrue(edit.ownsTemporaryText)
+        edit.restore()
+        XCTAssertEqual(board.string(forType: .string), "исходный буфер")
     }
 
     func testPasteboardDoesNotStageOverNewerContents() {

@@ -2,8 +2,15 @@ import AppKit
 import Carbon
 import SwitcherCore
 
+protocol PendingTextEdit: AnyObject {
+    var waitingForPaste: Bool { get }
+    func start()
+    func cancel()
+    func beforeUserKey(changesClipboard: Bool)
+}
+
 /// Selects a verified range, pastes into its app, and restores the clipboard when the edit finishes.
-final class PasteEdit {
+final class PasteEdit: PendingTextEdit {
     static let eventMarker: Int64 = 0x4C53575041535445
     enum Result { case pasted, failed, cancelled }
 
@@ -34,14 +41,16 @@ final class PasteEdit {
     }
 
     func start() {
-        guard CGPreflightPostEventAccess(), stillFocused(), field.canEdit, !field.hasMultipleSelections, targetIsUnchanged,
+        guard CGPreflightPostEventAccess(), stillFocused(), field.canEdit, field.canVerifySingleSelection, targetIsUnchanged,
               let clipboard = PasteboardTransaction(pasteboard: .general),
               stillFocused(), targetIsUnchanged
         else { finish(.failed); return }
         self.clipboard = clipboard
 
-        if snapshot.selection != range, !field.select(range) {
-            // When the app won't set an AX range, select backward from the verified caret.
+        let useKeyboard = field.isVSCodeEditor && original.count <= 128
+        if snapshot.selection != range, useKeyboard || !field.select(range) {
+            // VS Code can accept the AX range without moving the editor's selection.
+            // Select backward from the verified caret when AX selection is unreliable.
             guard snapshot.selection == NSRange(location: NSMaxRange(range), length: 0),
                   original.count <= 128, stillFocused(),
                   field.selection == snapshot.selection, field.text == snapshot.text,
@@ -57,7 +66,7 @@ final class PasteEdit {
         if !waitingForPaste { finish(.cancelled) }
     }
 
-    func beforeUserKey() {
+    func beforeUserKey(changesClipboard: Bool) {
         if waitingForPaste, !cancelled, stillFocused(), field.text == expectedValue {
             finish(.pasted)
         } else {
@@ -80,7 +89,7 @@ final class PasteEdit {
             }
             return
         }
-        guard let clipboard, clipboard.stage(replacement), stillFocused(), field.canEdit,
+        guard field.canVerifySingleSelection, let clipboard, clipboard.stage(replacement), stillFocused(), field.canEdit,
               field.text == snapshot.text, targetIsSelected, clipboard.ownsTemporaryText,
               postKey(UInt16(kVK_ANSI_V), flags: .maskCommand)
         else { finish(.failed); return }
@@ -89,7 +98,8 @@ final class PasteEdit {
     }
 
     private var targetIsSelected: Bool {
-        guard field.selection == range, !field.hasMultipleSelections else { return false }
+        guard field.selection == range, !field.hasMultipleSelections,
+              !field.isVSCodeEditor || field.vscodePosition?.hasSelection == true else { return false }
         return field.selectedText.map { $0 == original } ?? true
     }
 
@@ -120,6 +130,10 @@ final class PasteEdit {
     }
 
     private func postKey(_ key: CGKeyCode, flags: CGEventFlags, count: Int = 1) -> Bool {
+        Self.postKey(key, flags: flags, count: count, to: field.pid)
+    }
+
+    static func postKey(_ key: CGKeyCode, flags: CGEventFlags, count: Int = 1, to pid: pid_t) -> Bool {
         guard let source = CGEventSource(stateID: .privateState),
               let down = CGEvent(keyboardEventSource: source, virtualKey: key, keyDown: true),
               let up = CGEvent(keyboardEventSource: source, virtualKey: key, keyDown: false)
@@ -129,8 +143,8 @@ final class PasteEdit {
             event.setIntegerValueField(.eventSourceUserData, value: Self.eventMarker)
         }
         for _ in 0..<count {
-            down.postToPid(field.pid)
-            up.postToPid(field.pid)
+            down.postToPid(pid)
+            up.postToPid(pid)
         }
         return true
     }

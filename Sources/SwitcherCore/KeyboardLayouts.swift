@@ -72,6 +72,12 @@ public struct KeyboardLayout {
         text.reduce(0) { $0 + ($1.isLetter && strokes[$1] != nil ? 1 : 0) }
     }
 
+    func replayText(for strokes: [KeyboardStroke]) -> String? {
+        let mapped = strokes.compactMap { characters[$0] }
+        guard mapped.count == strokes.count else { return nil }
+        return mapped.joined()
+    }
+
     static func string(_ source: TISInputSource, _ property: CFString) -> String? {
         guard let value = TISGetInputSourceProperty(source, property) else { return nil }
         return unsafeBitCast(value, to: CFString.self) as String

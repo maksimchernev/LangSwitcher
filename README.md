@@ -37,9 +37,11 @@ With more than two layouts, repeated taps cycle through the layouts that change 
 
 ## Compatibility and privacy
 
-LangSwitcher uses macOS Accessibility to verify the focused field and selection, then replaces the range with the editor's normal paste command. If the field or range cannot be verified, the shortcut skips the edit. Formatting follows the editor's plain-text paste behavior. Password fields, secure input, and composition-based input methods are skipped.
+LangSwitcher uses macOS Accessibility to check the focused field and caret. When it verifies a recently typed word, it can switch layouts, delete the recorded characters, and replay their keystrokes. Other corrections use verified paste. In VS Code, LangSwitcher can also read the target through the clipboard when Accessibility does not expose the editor text. Password fields, secure input, and composition-based input methods are skipped.
 
-Text is processed on your Mac. Recent input is held in memory while the field is focused. LangSwitcher temporarily puts the replacement on the clipboard, then restores your previous contents on this Mac or clears the clipboard if it was empty. It checks for newer clipboard contents before writing or restoring. If macOS asks for paste access, it is needed to save and restore the clipboard. The edit is skipped if the original contents cannot be saved.
+In VS Code, LangSwitcher uses the **Editor Selection** status bar item to verify a single cursor or selection. Keep that item visible. VS Code may show **Screen Reader Optimized** after LangSwitcher requests access to the editor. VS Code can play accessibility sounds in that mode. Its `accessibility.signalOptions.volume` setting controls their volume.
+
+Text is processed on your Mac. Recent input is held in memory while the field is focused. Corrections that use the clipboard save its previous contents and restore them after editing. LangSwitcher checks for newer clipboard contents before writing or restoring. If macOS asks for paste access, it is needed to save and restore the clipboard. The edit is skipped if the original contents cannot be saved.
 
 ## Checks
 

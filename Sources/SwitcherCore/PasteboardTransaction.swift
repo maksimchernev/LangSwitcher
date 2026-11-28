@@ -39,12 +39,12 @@ public final class PasteboardTransaction {
     }
 
     public func stage(_ text: String) -> Bool {
-        guard stagedVersion == nil, pasteboard.changeCount == originalVersion else { return false }
+        guard !didWriteText, let version = copyBaseline else { return false }
         let item = NSPasteboardItem()
         guard item.setString(text, forType: .string),
               item.setString(token, forType: Self.marker),
               item.setData(Data(), forType: Self.transient),
-              pasteboard.changeCount == originalVersion else { return false }
+              pasteboard.changeCount == version else { return false }
 
         stagedVersion = pasteboard.prepareForNewContents(with: .currentHostOnly)
         guard pasteboard.changeCount == stagedVersion, pasteboard.writeObjects([item]) else {
@@ -56,6 +56,24 @@ public final class PasteboardTransaction {
         return ownsTemporaryText
     }
 
+    public var copyBaseline: Int? {
+        let version = stagedVersion ?? originalVersion
+        return pasteboard.changeCount == version ? version : nil
+    }
+
+    public enum CopyObservation { case waiting, unexpected, copied(String) }
+
+    public func observeCopy(after baseline: Int, accepts: (NSPasteboard) -> Bool) -> CopyObservation {
+        let version = pasteboard.changeCount
+        if version == baseline { return .waiting }
+        guard version == baseline + 1, accepts(pasteboard),
+              let text = pasteboard.string(forType: .string),
+              pasteboard.changeCount == version else { return .unexpected }
+        stagedVersion = version
+        didWriteText = false
+        return .copied(text)
+    }
+
     public var ownsTemporaryText: Bool {
         guard let stagedVersion, didWriteText, pasteboard.changeCount == stagedVersion else { return false }
         return pasteboard.string(forType: Self.marker) == token && pasteboard.changeCount == stagedVersion
@@ -63,7 +81,7 @@ public final class PasteboardTransaction {
 
     public func restore() {
         guard let version = stagedVersion else { return }
-        defer { stagedVersion = nil }
+        defer { stagedVersion = nil; didWriteText = false }
         guard didWriteText ? ownsTemporaryText : pasteboard.changeCount == version else { return }
         // The previous owner's transfer options aren't available, so keep this write on this Mac.
         let emptyVersion = pasteboard.prepareForNewContents(with: .currentHostOnly)
